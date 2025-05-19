@@ -1,0 +1,14 @@
+apiVersion: 1
+
+providers:
+  - name: 'llama-cpp'
+    orgId: 1
+    folder: 'llama-cpp'
+    folderUid: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
+      foldersFromFilesStructure: true

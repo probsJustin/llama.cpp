@@ -1,0 +1,30 @@
+--- common/CMakeLists.txt	2024-05-19 12:00:00
++++ common/CMakeLists.txt.new	2024-05-19 12:00:00
+@@ -79,6 +79,8 @@
+     sampling.h
+     speculative.cpp
+     speculative.h
++    otel/otel.cpp
++    otel/otel.h
+     )
+ 
+ if (BUILD_SHARED_LIBS)
+@@ -99,6 +101,18 @@
+     set(LLAMA_COMMON_EXTRA_LIBS ${LLAMA_COMMON_EXTRA_LIBS} ${CURL_LIBRARY})
+ endif ()
+ 
++# OpenTelemetry support
++if (LLAMA_OTEL_ENABLE)
++    find_package(Protobuf REQUIRED)
++    find_library(OPENTELEMETRY_API_LIBRARY opentelemetry_api REQUIRED)
++    find_library(OPENTELEMETRY_SDK_LIBRARY opentelemetry_sdk REQUIRED)
++    find_library(OPENTELEMETRY_OTLP_LIBRARY opentelemetry_exporter_otlp_grpc REQUIRED)
++
++    target_compile_definitions(${TARGET} PUBLIC LLAMA_OTEL_ENABLE)
++    set(LLAMA_COMMON_EXTRA_LIBS ${LLAMA_COMMON_EXTRA_LIBS} ${OPENTELEMETRY_API_LIBRARY} ${OPENTELEMETRY_SDK_LIBRARY} ${OPENTELEMETRY_OTLP_LIBRARY} ${PROTOBUF_LIBRARIES})
++    target_include_directories(${TARGET} PRIVATE ${PROTOBUF_INCLUDE_DIRS})
++endif()
++
+ if (LLAMA_LLGUIDANCE)
+     include(ExternalProject)
+     set(LLGUIDANCE_SRC ${CMAKE_BINARY_DIR}/llguidance/source)

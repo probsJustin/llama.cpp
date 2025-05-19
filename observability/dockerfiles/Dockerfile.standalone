@@ -1,0 +1,102 @@
+FROM ubuntu:22.04 as base
+
+# Install common dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    curl \
+    git \
+    libboost-all-dev \
+    libssl-dev \
+    pkg-config \
+    python3 \
+    python3-pip \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install gRPC and Protobuf
+RUN apt-get update && apt-get install -y \
+    libgrpc++-dev \
+    libprotobuf-dev \
+    protobuf-compiler \
+    protobuf-compiler-grpc \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM base as otel-build
+
+# Build OpenTelemetry CPP SDK
+WORKDIR /build
+RUN git clone --recurse-submodules https://github.com/open-telemetry/opentelemetry-cpp.git && \
+    cd opentelemetry-cpp && \
+    mkdir build && \
+    cd build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DBUILD_TESTING=OFF \
+        -DWITH_OTLP=ON \
+        -DWITH_OTLP_GRPC=ON \
+        -DWITH_OTLP_HTTP=OFF \
+        -DWITH_EXAMPLES=OFF && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig
+
+FROM otel-build as llama-build
+
+# Clone and build llama.cpp with OpenTelemetry
+WORKDIR /build
+COPY . /build/llama.cpp/
+WORKDIR /build/llama.cpp
+RUN mkdir -p build && \
+    cd build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLAMA_NATIVE=ON \
+        -DLLAMA_BLAS=ON \
+        -DLLAMA_BUILD_SERVER=ON \
+        -DLLAMA_OTEL_ENABLE=ON && \
+    cmake --build . --config Release -j$(nproc)
+
+FROM ubuntu:22.04 as runtime
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libcurl4 \
+    libgrpc++1.30 \
+    libprotobuf23 \
+    libjemalloc2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy OpenTelemetry libraries
+COPY --from=otel-build /usr/local/lib/libopentelemetry* /usr/local/lib/
+COPY --from=otel-build /usr/local/include/opentelemetry /usr/local/include/opentelemetry
+
+# Copy llama.cpp binaries
+WORKDIR /app
+COPY --from=llama-build /build/llama.cpp/build/bin /app/
+COPY --from=llama-build /build/llama.cpp/build/examples /app/examples
+COPY --from=llama-build /build/llama.cpp/build/tools /app/tools
+
+# Copy models directory (to be mounted)
+RUN mkdir -p /app/models
+
+# Set environment variables
+ENV OTEL_SERVICE_NAME=llama-cpp-server
+ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+ENV OTEL_RESOURCE_ATTRIBUTES=service.name=llama-cpp-server,service.version=1.0.0
+ENV OTEL_TRACES_SAMPLER=always_on
+ENV OTEL_METRICS_EXPORTER=otlp
+ENV OTEL_LOGS_EXPORTER=otlp
+
+# Update library path
+RUN ldconfig
+
+# Expose server port
+EXPOSE 8080
+
+# Set entrypoint
+ENTRYPOINT ["/app/server"]
+
+# Default command (can be overridden)
+CMD ["-h"]
